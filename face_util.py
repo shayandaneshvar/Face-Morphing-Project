@@ -1,209 +1,244 @@
-import dlib
 import cv2
-from matplotlib.pyplot import axis
+import dlib
 import numpy as np
 
+
 class FaceUtil:
-  def __init__(self, dlib_predictor_path):
-    self.face_detector = dlib.get_frontal_face_detector()
-    self.face_landmarks_detector = dlib.shape_predictor(dlib_predictor_path)
-    self.last_detected_face = np.random.randint(0, 100, (68, 2), np.uint8)
-  
-  def __pre_process_image(self, image):
-    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    def __init__(self, dlib_predictor_path):
+        self.face_detector = dlib.get_frontal_face_detector()
+        self.face_landmarks_detector = dlib.shape_predictor(dlib_predictor_path)
+        self.last_detected_face = np.random.randint(0, 100, (68, 2), np.uint8)
 
-  def __draw_face_land_marks(self, face_landmarks, image):
-    for n in range(0, 68):
-      x = face_landmarks.part(n).x
-      y = face_landmarks.part(n).y
-      cv2.circle(image, (x, y), 1, (0, 255, 255), 1)
+    def __pre_process_image(self, image):
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-  def __shape_to_np(self, shape, dtype="int"):
-    coords = np.zeros((68, 2), dtype=dtype)
-    for i in range(0, 68):
-      coords[i] = (shape.part(i).x, shape.part(i).y)
-    return coords
+    def __draw_face_land_marks(self, face_landmarks, image):
+        for n in range(0, 68):
+            x = face_landmarks.part(n).x
+            y = face_landmarks.part(n).y
+            cv2.circle(image, (x, y), 1, (0, 255, 255), 1)
 
-  def get_facelandmarks(self, image):
-    gray = self.__pre_process_image(image)
-    faces = self.face_detector(gray)
+    def __shape_to_np(self, shape, dtype="int"):
+        coords = np.zeros((68, 2), dtype=dtype)
+        for i in range(0, 68):
+            coords[i] = (shape.part(i).x, shape.part(i).y)
+        return coords
 
-    if len(faces) == 0:
-      return self.last_detected_face
-      
-    face = faces[0]
-    face_landmarks = self.face_landmarks_detector(gray, face)
-    face_landmarks = self.__shape_to_np(face_landmarks)
-    self.last_detected_face = face_landmarks
+    def get_face_landmarks(self, image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        faces = self.face_detector(gray)
 
-    return face_landmarks
+        if len(faces) == 0:
+            return self.last_detected_face
 
-  def get_normalized_facelandmarks(self, image):
-      face_landmarks = self.get_facelandmarks(image)
-
-      return np.subtract(face_landmarks, np.mean(face_landmarks, axis=0))
-
-  def __affine_register(self, face1_landmarks, face2_landmarks):
-      coefficient_1 = (face2_landmarks[:, 0] * face2_landmarks[:, 0]).sum()
-      coefficient_2 = (face2_landmarks[:, 1] * face2_landmarks[:, 0]).sum()
-      coefficient_3 = (face2_landmarks[:, 1] * face2_landmarks[:, 1]).sum()
-
-      coefficients_matrix = [[coefficient_1, coefficient_2, 0, 0],
-                      [coefficient_2, coefficient_3, 0, 0],
-                      [0, 0, coefficient_1, coefficient_2],
-                      [0, 0, coefficient_2, coefficient_3]
-                      ]
-
-      equation_1_answer = (face1_landmarks[:, 0] * face2_landmarks[:, 0]).sum()
-      equation_2_answer = (face1_landmarks[:, 0] * face2_landmarks[:, 1]).sum()
-      equation_3_answer = (face2_landmarks[:, 0] * face1_landmarks[:, 1]).sum()
-      equation_4_answer = (face1_landmarks[:, 1] * face2_landmarks[:, 1]).sum()
-
-      answers = [equation_1_answer, equation_2_answer,
-                equation_3_answer, equation_4_answer]
-
-      result = np.linalg.solve(coefficients_matrix, answers)
-
-      return result.reshape((2,2))
-
-  def __similarity_register(self, face1_landmarks, face2_landmarks):
-    coefficient = (face2_landmarks[:,0] ** 2 + face2_landmarks[:,1] ** 2).sum()
-    equation_1_answer = (face1_landmarks[:,0] * face2_landmarks[:,0] + face1_landmarks[:,1] * face2_landmarks[:,1]).sum()
-    equation_2_answer = (face1_landmarks[:,1] * face2_landmarks[:,0] - face1_landmarks[:,0] * face2_landmarks[:,1]).sum()
-    coefficients_matrix = [[coefficient, 0], [0, coefficient]]
-    answers = [equation_1_answer, equation_2_answer]
-
-    a, b = np.linalg.solve(coefficients_matrix, answers)
-
-    return [[a, -b], [b, a]]
-
-  def __apply_transform(self, image, transformMatrix):
-    return image @ transformMatrix
-
-  def draw_face(self, image, points, color):
-    width = image.shape[0]
-    height = image.shape[0]
-    for (x, y) in points:
-        cv2.circle(image, (int(x + width / 2),
-                   int(y + height / 2)), 1, color, 1)
-
-  def get_registered_face(self, image1, image2, method):
-    face1_landmarks = self.get_normalized_facelandmarks(image1)
-    face2_landmarks = self.get_normalized_facelandmarks(image2)
-
-    if method == "affine":
-      M = self.__affine_register(face1_landmarks, face2_landmarks)
-    elif method == "similarity":
-      M = self.__similarity_register(face1_landmarks, face2_landmarks)
-    else:
-      raise Exception("invalid register method")
-
-    return self.__apply_transform(face2_landmarks, M)
-
-  def register_faces(self, faces, target_image, method):
-    registered_faces = []
-
-    for face in faces:
-      registered_faces.append(self.get_registered_face(target_image, face, method))
-
-    return np.array(registered_faces)
-            
-  def show_faces_landmarks(self, images):
-    for image in images:
-      gray = self.__pre_process_image(image)
-      faces = self.face_detector(gray)
-
-      for face in faces:
+        face = faces[0]
         face_landmarks = self.face_landmarks_detector(gray, face)
-        self.__draw_face_land_marks(face_landmarks, image)
+        face_landmarks = self.__shape_to_np(face_landmarks)
+        self.last_detected_face = face_landmarks
 
-      cv2.imshow('face landmarks', image)
-      cv2.waitKey(0)
-      cv2.destroyWindow('face landmarks')
+        return face_landmarks
 
-  def show_mean_face(self, faces):
-    mean_face = np.mean(([face for face in faces]), axis=0)
+    def get_normalized_face_landmarks(self, image):
+        face_landmarks = self.get_face_landmarks(image)
 
-    base = np.zeros((400, 400, 3), np.uint8)
+        return np.subtract(face_landmarks, np.mean(face_landmarks, axis=0))
 
-    self.draw_face(base, mean_face, (0, 255, 0))
+    @staticmethod
+    def _affine_register(face1_landmarks, face2_landmarks):
+        coefficient_1 = (face2_landmarks[:, 0] * face2_landmarks[:, 0]).sum()
+        coefficient_2 = (face2_landmarks[:, 1] * face2_landmarks[:, 0]).sum()
+        coefficient_3 = (face2_landmarks[:, 1] * face2_landmarks[:, 1]).sum()
 
-    cv2.imshow('mean face landmarks', base)
-    cv2.waitKey(0)
-    cv2.destroyWindow('mean face landmarks')
+        coefficients_matrix = [[coefficient_1, coefficient_2, 0, 0],
+                               [coefficient_2, coefficient_3, 0, 0],
+                               [0, 0, coefficient_1, coefficient_2],
+                               [0, 0, coefficient_2, coefficient_3]
+                               ]
 
-  def __calc_miu(self, faces):
-    return np.mean(([face.flatten() for face in faces]), axis=0).reshape((136, 1))
+        equation_1_answer = (
+                face1_landmarks[:, 0] * face2_landmarks[:, 0]).sum()
+        equation_2_answer = (
+                face1_landmarks[:, 0] * face2_landmarks[:, 1]).sum()
+        equation_3_answer = (
+                face2_landmarks[:, 0] * face1_landmarks[:, 1]).sum()
+        equation_4_answer = (
+                face1_landmarks[:, 1] * face2_landmarks[:, 1]).sum()
 
-  def find_pca(self, faces, K):
-    miu = self.__calc_miu(faces)
-    X = np.concatenate([face.flatten().reshape((136, 1)) for face in faces], axis=1)
-    X -= miu
-    U, sigma, _ = np.linalg.svd(X)
-    U = U[:, :K]
-    sigma = sigma[:K]
-    return miu, U, sigma
+        answers = [equation_1_answer, equation_2_answer,
+                   equation_3_answer, equation_4_answer]
 
-  def animate_face(self, faces, K):
-    miu, U, sigma = self.find_pca(faces, K)
-    print(sigma)
+        result = np.linalg.solve(coefficients_matrix, answers)
 
-    for i in range(min(K, len(sigma))):
-      for a in np.arange(-abs(sigma[i] * 2), abs(sigma[i] * 2), 1):
-        img = np.zeros((1024, 1024, 3), np.uint8)
-        face = miu + a * U[:, i]
-        for j in range(0, 136, 2):
-            cv2.circle(
-                img,
-                (int(face[j, 0]) + 200, int(face[j + 1, 0]) + 200),
-                1,
-                (255, 125, 125),
-                1,
-            )
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-          break
-        cv2.putText(img, str(a), (500, 500), 2, 4, (0, 0, 255))
-        cv2.imshow("face model", img)
-        cv2.waitKey(10)
-  
-  def open_camera(self, miu, U):
-    camera_id = 0
-    cap = cv2.VideoCapture(camera_id)
+        return result.reshape((2, 2))
 
-    while True:
-        _, frame = cap.read()
-        X = self.get_normalized_facelandmarks(frame)
-        M = self.__affine_register(miu.reshape((68, 2)), X)
-        X = self.__apply_transform(X, M)
+    @staticmethod
+    def _similarity_register(face1_landmarks, face2_landmarks):
+        coefficient = (face2_landmarks[:, 0] ** 2 +
+                       face2_landmarks[:, 1] ** 2).sum()
 
-        X = X.flatten()
-        X.resize((136, 1))
+        equation_1_answer = (face1_landmarks[:, 0] *
+                             face2_landmarks[:, 0] +
+                             face1_landmarks[:, 1] *
+                             face2_landmarks[:, 1]).sum()
 
-        a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
+        equation_2_answer = (face1_landmarks[:, 1] *
+                             face2_landmarks[:, 0] -
+                             face1_landmarks[:, 0] *
+                             face2_landmarks[:, 1]).sum()
 
-        face = miu + U @ a
+        coefficients_matrix = [[coefficient, 0], [0, coefficient]]
 
-        img = np.zeros((1024, 1024, 3), np.uint8)
-        for j in range(0, 136, 2):
-            cv2.circle(
-                img,
-                (2 * int(face[j, 0]) + 200, 2 * int(face[j + 1, 0]) + 200),
-                1,
-                (255, 0, 0),
-                1,
-            )
-            cv2.circle(
-                img,
-                (2 * int(X[j, 0]) + 200, 2 * int(X[j + 1, 0]) + 200),
-                1,
-                (0, 255, 255),
-                1,
-            )
-        cv2.imshow("WebCam", img)
+        answers = [equation_1_answer, equation_2_answer]
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+        a, b = np.linalg.solve(coefficients_matrix, answers)
 
-    cap.release()
-    cv2.destroyAllWindows()
+        return [[a, -b], [b, a]]
 
+    @staticmethod
+    def _apply_transform(image, transform_matrix):
+        return image @ transform_matrix
+
+    @staticmethod
+    def draw_face(image, points, color):
+        width = image.shape[0]
+        height = image.shape[1]
+        for (x, y) in points:
+            cv2.circle(image, (int(x + width / 2), int(y + height / 2)), 1,
+                       color, 2)
+
+    def get_registered_face(self, image1, image2, method):
+        face1_landmarks = self.get_normalized_face_landmarks(image1)  # neutral
+        face2_landmarks = self.get_normalized_face_landmarks(image2)
+
+        if method == "affine":
+            M = FaceUtil._affine_register(face1_landmarks, face2_landmarks)
+        elif method == "similarity":
+            M = FaceUtil._similarity_register(face1_landmarks, face2_landmarks)
+        else:
+            raise Exception("invalid register method")
+
+        return FaceUtil._apply_transform(face2_landmarks, M)
+
+    def register_faces(self, faces, target_image, method):
+        registered_faces = []
+
+        for face in faces:
+            registered_faces.append(
+                self.get_registered_face(target_image, face, method))
+
+        return np.array(registered_faces)
+
+    def show_faces_landmarks(self, images):
+        for image in images:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            faces = self.face_detector(gray)
+
+            for face in faces:
+                face_landmarks = self.face_landmarks_detector(gray, face)
+                self.__draw_face_land_marks(face_landmarks, image)
+
+            cv2.imshow('face landmarks', image)
+            cv2.waitKey(0)
+            cv2.destroyWindow('face landmarks')
+
+    @staticmethod
+    def show_mean_face(faces):
+        mean_face = np.mean(([face for face in faces]), axis=0)
+
+        base = np.zeros((500, 500, 3), np.uint8)
+
+        FaceUtil.draw_face(base, mean_face, (0, 255, 0))
+
+        cv2.imshow('mean face landmarks', base)
+        cv2.waitKey(0)
+        cv2.destroyWindow('mean face landmarks')
+
+    @staticmethod
+    def _calc_miu(faces):
+        return np.mean(([face.flatten() for face in faces]), axis=0).reshape(
+            (136, 1))
+
+    @staticmethod
+    def find_pca(faces, k):
+        miu = FaceUtil._calc_miu(faces)
+        X = np.concatenate([face.flatten().reshape((136, 1))
+                            for face in faces], axis=1)
+        X -= miu
+        U, sigma, _ = np.linalg.svd(X)  # _ V
+        U = U[:, :k]
+        sigma = sigma[:k]
+        return miu, U, sigma
+
+    @staticmethod
+    def animate_face(faces, k):
+        miu, U, sigma = FaceUtil.find_pca(faces, k)
+        print(sigma)
+
+        for i in range(min(k, len(sigma))):
+            for a in np.arange(-abs(sigma[i] * 2), abs(sigma[i] * 2), 1):
+                img = np.zeros((1024, 1024, 3), np.uint8)
+                face = miu + a * U[:, i]
+                for j in range(0, 136, 2):
+                    cv2.circle(
+                        img,
+                        (int(face[j, 0]) + 200, int(face[j + 1, 0]) + 200),
+                        1,
+                        (255, 125, 125),
+                        1,
+                    )
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+                cv2.putText(img, str(a), (500, 500), 2, 4, (0, 0, 255))
+                cv2.imshow("face model", img)
+                cv2.waitKey(10)
+
+    def open_camera(self, miu, U):
+        camera_id = 0
+        cap = cv2.VideoCapture(camera_id)
+
+        while True:
+            _, frame = cap.read()
+            frame = frame[:, ::-1]  # mirror
+            X = self.get_normalized_face_landmarks(frame)
+            M = FaceUtil._affine_register(miu.reshape((68, 2)), X)
+            X = FaceUtil._apply_transform(X, M)
+
+            X = X.flatten()
+            X.resize((136, 1))
+
+            a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
+
+            face = miu + U @ a
+
+            img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+            img2 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+            empty_img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+
+            for j in range(0, 136, 2):
+                cv2.circle(
+                    img,
+                    (int(face[j, 0] + frame.shape[0] / 1.8),
+                     int(face[j + 1, 0] + frame.shape[1] / 3)),
+                    1,
+                    (200, 200, 50),
+                    1,
+                )
+                cv2.circle(
+                    img2,
+                    (int(X[j, 0] + frame.shape[0] / 1.8),
+                     int(X[j + 1, 0] + frame.shape[1] / 3)),
+                    1,
+                    (0, 255, 255),
+                    1,
+                )
+            img = np.hstack([img, frame])
+            img2 = np.hstack([img2, empty_img])
+            img = np.vstack([img, img2])
+
+            cv2.imshow("WebCam", img)
+
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
