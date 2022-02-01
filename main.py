@@ -11,7 +11,7 @@ transform = ["affine", "similarity"]
 
 def read_images(person="alireza"):
     image_list = []
-    for filename in glob.glob(f'images/{person}/*.jpg'):
+    for filename in glob.glob(f'images/{person}/*.*'):
         image = cv2.imread(filename)
         image_list.append(image)
     return image_list
