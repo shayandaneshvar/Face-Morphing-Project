@@ -175,9 +175,10 @@ class FaceUtil:
         print(sigma)
 
         for i in range(min(k, len(sigma))):
-            for a in np.arange(-abs(sigma[i] * 2), abs(sigma[i] * 2), 1):
-                img = np.zeros((1024, 1024, 3), np.uint8)
-                face = miu + a * U[:, i]
+            
+            for a in np.arange(- sigma[i], sigma[i], 2):
+                img = np.zeros((800, 800, 3), np.uint8)
+                face = miu + np.matrix(a * U[:, i]).reshape((136,1))
                 for j in range(0, 136, 2):
                     cv2.circle(
                         img,
@@ -188,7 +189,8 @@ class FaceUtil:
                     )
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
-                cv2.putText(img, str(a), (500, 500), 2, 4, (0, 0, 255))
+                cv2.putText(img, str(a), (300, 500), cv2.FONT_HERSHEY_COMPLEX,
+                            1, (0, 0, 255))
                 cv2.imshow("face model", img)
                 cv2.waitKey(10)
 
@@ -207,7 +209,7 @@ class FaceUtil:
             X.resize((136, 1))
 
             a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
-
+            print(a)
             face = miu + U @ a
 
             img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
