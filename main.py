@@ -60,5 +60,5 @@ if __name__ == '__main__':
                               face_util,
                               viz=False,
                               method=transform[0])
-    phase2(face_util, registered_faces, k=10)
-    # phase3(face_util, registered_faces)
+    # phase2(face_util, registered_faces, k=10)
+    phase3(face_util, registered_faces)

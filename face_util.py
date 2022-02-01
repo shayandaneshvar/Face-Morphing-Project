@@ -240,6 +240,9 @@ class FaceUtil:
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, empty_img])
             img = np.vstack([img, img2])
+            scale = frame.shape[0]/frame.shape[1]
+            img = cv2.resize(img, (768, int(768 * scale)))
+
 
             cv2.imshow("WebCam", img)
 
