@@ -128,8 +128,9 @@ class FaceUtil:
 
         return np.array(registered_faces)
 
-    def show_faces_landmarks(self, images):
-        for image in images:
+    def show_faces_landmarks(self, images, sample_numbers):
+        for i in range(0, sample_numbers):
+            image = images[i]
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             faces = self.face_detector(gray)
 
@@ -198,7 +199,16 @@ class FaceUtil:
                 cv2.imshow("face model", img)
                 cv2.waitKey(10)
 
-    def open_camera(self, miu, U):
+    @staticmethod  # rect -> detect face
+    def triangulate(face, rect, x, y):
+        subdiv = cv2.Subdiv2D(rect)
+        points = face.reshape(-1, 2)
+        for point in points:
+            p = (point[0] + x, point[1] + y)
+            subdiv.insert(p)
+        return subdiv.getTriangleList()
+
+    def open_camera(self, miu, U, neutral_image):
         camera_id = 0
         cap = cv2.VideoCapture(camera_id)
 
@@ -211,6 +221,45 @@ class FaceUtil:
 
             X = X.flatten()
             X.resize((136, 1))
+            img3 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+
+            rect = [0, 0, frame.shape[0], frame.shape[1]]
+
+            if len(rect) is 4:
+                try:
+                    triangles = FaceUtil.triangulate(X, rect,
+                                                     frame.shape[0] / 1.8,
+                                                     frame.shape[1] / 3)
+                except Exception:
+                    triangles = np.array([])
+                    pass
+                    # out of range ...
+
+                for j in range(triangles.shape[0]):
+                    x = triangles[j, 0] + triangles[j, 2] + triangles[j, 4]
+                    y = triangles[j, 1] + triangles[j, 3] + triangles[j, 5]
+                    x /= 3
+                    y /= 3
+                    M_inverse = np.linalg.inv(M)
+                    location = M_inverse @ np.array([[x], [y]])
+                    color = tuple([int(f) for f in
+                                   neutral_image[int(location[0, 0])]
+                                   [int(location[1, 0])]])
+
+                    contours = np.array([np.int32(triangles[j, i])
+                                         for i in range(6)]).reshape(-1, 2)
+
+                    cv2.fillPoly(img3, [contours], color)
+
+                    cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
+                             (triangles[j, 2], triangles[j, 3]),
+                             (255, 255, 255))
+                    cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
+                             (triangles[j, 4], triangles[j, 5]),
+                             (255, 255, 255))
+                    cv2.line(img3, (triangles[j, 4], triangles[j, 5]),
+                             (triangles[j, 2], triangles[j, 3]),
+                             (255, 255, 255))
 
             a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
             print(a)
@@ -218,31 +267,35 @@ class FaceUtil:
 
             img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
             img2 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
-            empty_img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
 
             for j in range(0, 136, 2):
+                cv2.putText(img, "The Other Guy", (50, 50), 3, 1, (0, 0, 200))
                 cv2.circle(
                     img,
                     (int(face[j, 0] + frame.shape[0] / 1.8),
                      int(face[j + 1, 0] + frame.shape[1] / 3)),
-                    1,
+                    2,
                     (200, 200, 50),
-                    1,
+                    2,
                 )
+                cv2.putText(img2, "Original Face from webcam", (50, 50), 3, 1,
+                            (0, 0, 200))
                 cv2.circle(
                     img2,
                     (int(X[j, 0] + frame.shape[0] / 1.8),
                      int(X[j + 1, 0] + frame.shape[1] / 3)),
-                    1,
+                    2,
                     (0, 255, 255),
-                    1,
+                    2,
                 )
-            img = np.hstack([img, frame])
-            img2 = np.hstack([img2, empty_img])
-            img = np.vstack([img, img2])
-            scale = frame.shape[0]/frame.shape[1]
-            img = cv2.resize(img, (768, int(768 * scale)))
+                cv2.putText(img3, "The Other Guy - triangulated", (50, 50), 3,
+                            1, (0, 0, 200))
 
+            img = np.hstack([img, frame])
+            img2 = np.hstack([img2, img3])
+            img = np.vstack([img, img2])
+            scale = frame.shape[0] / frame.shape[1]
+            img = cv2.resize(img, (768, int(768 * scale)))
 
             cv2.imshow("WebCam", img)
 
