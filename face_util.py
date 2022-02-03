@@ -1,6 +1,7 @@
 import cv2
 import dlib
 import numpy as np
+from scipy.spatial import Delaunay
 
 
 class FaceUtil:
@@ -40,8 +41,8 @@ class FaceUtil:
 
     def get_normalized_face_landmarks(self, image):
         face_landmarks = self.get_face_landmarks(image)
-
-        return np.subtract(face_landmarks, np.mean(face_landmarks, axis=0))
+        mean = np.mean(face_landmarks, axis=0)
+        return np.subtract(face_landmarks, mean), mean
 
     @staticmethod
     def _affine_register(face1_landmarks, face2_landmarks):
@@ -107,8 +108,9 @@ class FaceUtil:
                        color, 2)
 
     def get_registered_face(self, image1, image2, method):
-        face1_landmarks = self.get_normalized_face_landmarks(image1)  # neutral
-        face2_landmarks = self.get_normalized_face_landmarks(image2)
+        face1_landmarks, _ = self.get_normalized_face_landmarks(
+            image1)  # neutral
+        face2_landmarks, _ = self.get_normalized_face_landmarks(image2)
 
         if method == "affine":
             M = FaceUtil._affine_register(face1_landmarks, face2_landmarks)
@@ -173,7 +175,7 @@ class FaceUtil:
     @staticmethod
     def animate_face(faces, k):
         miu, U, sigma = FaceUtil.find_pca(faces, k)
-        print(sigma)
+        # print(sigma)
 
         for i in range(min(k, len(sigma))):
 
@@ -199,71 +201,104 @@ class FaceUtil:
                 cv2.imshow("face model", img)
                 cv2.waitKey(10)
 
-    @staticmethod  # rect -> detect face
-    def triangulate(face, rect, x, y):
-        subdiv = cv2.Subdiv2D(rect)
+    # @staticmethod  # rect -> detect face
+    # def triangulate(face, rect):
+    #     subdiv = cv2.Subdiv2D(rect)
+    #     points = face.reshape(-1, 2)
+    #     for point in points:
+    #         p = (point[0], point[1])
+    #         subdiv.insert(p)
+    #     return subdiv.getTriangleList()
+
+    @staticmethod
+    def triangulate(face):
         points = face.reshape(-1, 2)
-        for point in points:
-            p = (point[0] + x, point[1] + y)
-            subdiv.insert(p)
-        return subdiv.getTriangleList()
+        return Delaunay(points)
+
+    @staticmethod
+    def get_triangle_containing_point(triangles: Delaunay, x, y):
+        triangle_index = triangles.find_simplex(np.array([x, y]))
+        if triangle_index == -1:
+            return None
+        points_index = triangles.simplices[triangle_index]
+        return triangles.points[points_index[0]], triangles.points[
+            points_index[1]], triangles.points[points_index[2]]
+
+    @staticmethod
+    def get_triangle_index_containing_point(triangles: Delaunay, x, y):
+        return triangles.find_simplex([[x, y]])
+
+    @staticmethod
+    def get_neutral_face_landmark_from_transformed_neutral_face(
+            transformed_neutral_face, NL_landmarks, x, y):
+        for i in range(0, transformed_neutral_face.shape[0], 2):
+            if transformed_neutral_face[i, 0] == x and \
+                    transformed_neutral_face[i + 1, 0] == y:
+                return NL_landmarks[i, 0], NL_landmarks[i + 1, 0]
+        return -1
 
     def open_camera(self, miu, U, neutral_image):
         camera_id = 0
         cap = cv2.VideoCapture(camera_id)
+        NL, NL_Mean = self.get_normalized_face_landmarks(neutral_image)  # Nln
+        NL_landmarks = NL + NL_Mean
+        NL_landmarks = NL_landmarks.reshape((136, 1))
+        M = FaceUtil._affine_register(miu.reshape((68, 2)), NL)
+        NL = FaceUtil._apply_transform(NL, M)
+        NL = NL.flatten().reshape((136, 1))
 
         while True:
             _, frame = cap.read()
             frame = frame[:, ::-1]  # mirror
-            X = self.get_normalized_face_landmarks(frame)
+            X, _ = self.get_normalized_face_landmarks(frame)
+            img3 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
             M = FaceUtil._affine_register(miu.reshape((68, 2)), X)
             X = FaceUtil._apply_transform(X, M)
 
             X = X.flatten()
             X.resize((136, 1))
-            img3 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+            # COLORING
+            af = np.linalg.inv(U.T @ U) @ U.T @ (X - NL)
+            transformed_neutral_face = NL + U @ af
+            triangles: Delaunay = FaceUtil.triangulate(transformed_neutral_face)
 
-            rect = [0, 0, frame.shape[0], frame.shape[1]]
+            color_mappings = {}  # map: triangle -> color
+            for i in range(triangles.simplices.shape[0]):
+                pi1, pi2, pi3 = triangles.simplices[i]
+                p1 = triangles.points[pi1]
+                p2 = triangles.points[pi2]
+                p3 = triangles.points[pi3]
+                location_on_neutral = np.zeros((3, 2))
 
-            if len(rect) is 4:
-                try:
-                    triangles = FaceUtil.triangulate(X, rect,
-                                                     frame.shape[0] / 1.8,
-                                                     frame.shape[1] / 3)
-                except Exception:
-                    triangles = np.array([])
-                    pass
-                    # out of range ...
+                location_on_neutral[0,
+                :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                    transformed_neutral_face, NL_landmarks, p1[0], p1[1])
+                location_on_neutral[
+                    1] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                    transformed_neutral_face, NL_landmarks, p2[0], p2[1])
+                location_on_neutral[
+                    2] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                    transformed_neutral_face, NL_landmarks, p3[0], p3[1])
+                point_location = location_on_neutral.mean(axis=0)  # simplex
+                color_mappings[i] = neutral_image[
+                    int(point_location[0]), int(point_location[1])]
 
-                for j in range(triangles.shape[0]):
-                    x = triangles[j, 0] + triangles[j, 2] + triangles[j, 4]
-                    y = triangles[j, 1] + triangles[j, 3] + triangles[j, 5]
-                    x /= 3
-                    y /= 3
-                    M_inverse = np.linalg.inv(M)
-                    location = M_inverse @ np.array([[x], [y]])
-                    color = tuple([int(f) for f in
-                                   neutral_image[int(location[0, 0])]
-                                   [int(location[1, 0])]])
+            # for i in range(triangles.simplices.shape[0]):
+            #     v = np.zeros((500, 500, 3), np.uint8)
+            #     v[:] = [color_mappings[i][0], color_mappings[i][1],
+            #             color_mappings[i][2]]
+            #     cv2.putText(v, f"{}", (10, 10), 3, 5, (255,0,255))
+            # cv2.imshow("sd", v)
+            # cv2.waitKey(100)
+            # print("s")
 
-                    contours = np.array([np.int32(triangles[j, i])
-                                         for i in range(6)]).reshape(-1, 2)
+            # X = miu + aU -> X - miu = aU -> a = (U.T @ U).inv @ U.T @ (X - miu)
+            # a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
+            # (A.T@A)-1 @ A.T @ b
 
-                    cv2.fillPoly(img3, [contours], color)
-
-                    cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
-                             (triangles[j, 2], triangles[j, 3]),
-                             (255, 255, 255))
-                    cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
-                             (triangles[j, 4], triangles[j, 5]),
-                             (255, 255, 255))
-                    cv2.line(img3, (triangles[j, 4], triangles[j, 5]),
-                             (triangles[j, 2], triangles[j, 3]),
-                             (255, 255, 255))
-
-            a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
-            print(a)
+            a = np.linalg.inv(U.T @ U) @ U.T @ (X - miu)
             face = miu + U @ a
+            # print(a)
 
             img = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
             img2 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
@@ -290,6 +325,25 @@ class FaceUtil:
                 )
                 cv2.putText(img3, "The Other Guy - triangulated", (50, 50), 3,
                             1, (0, 0, 200))
+            for i in range(img3.shape[0]):  # fixme
+                for j in range(img3.shape[1]):
+                    y = i - frame.shape[1] / 3
+                    x = j - frame.shape[0] / 1.8
+                    triangle_index = FaceUtil.get_triangle_index_containing_point(
+                        triangles, x, y)
+                    if triangle_index[0] < 0:
+                        continue
+                    img3[i, j] = color_mappings[triangle_index[0]]
+                    # print(f"-----------------> {(i,j)}")
+                    v = np.zeros((500, 500, 3), np.uint8)
+                    v[:] = [color_mappings[i][0], color_mappings[i][1],
+                            color_mappings[i][2]]
+                    cv2.putText(v, f"{x}", (0, 100), 3, 1, (255, 0, 255))
+                    cv2.putText(v, f"{y}", (0, 160), 3, 1, (255, 0, 255))
+                    cv2.putText(v, f"{j}", (0, 400), 3, 1, (255, 0, 255))
+                    cv2.putText(v, f"{i}", (0, 450), 3, 1, (255, 0, 255))
+                    cv2.imshow("sd", v)
+                    cv2.waitKey()
 
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, img3])
@@ -298,9 +352,46 @@ class FaceUtil:
             img = cv2.resize(img, (768, int(768 * scale)))
 
             cv2.imshow("WebCam", img)
-
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
         cap.release()
         cv2.destroyAllWindows()
+
+# rect = [-frame.shape[0], -frame.shape[1], frame.shape[0], frame.shape[1]]
+#
+# if len(rect) is 4:
+#     try:
+#         triangles = FaceUtil.triangulate(X, rect,
+#                                          frame.shape[0] / 1.8,
+#                                          frame.shape[1] / 3)
+#     except Exception:
+#         triangles = np.array([])
+#         pass
+#         # out of range ...
+#
+#     for j in range(triangles.shape[0]):
+#         x = triangles[j, 0] + triangles[j, 2] + triangles[j, 4]
+#         y = triangles[j, 1] + triangles[j, 3] + triangles[j, 5]
+#         x /= 3
+#         y /= 3
+#         M_inverse = np.linalg.inv(M)
+#         location = M_inverse @ np.array([[x], [y]])
+#         color = tuple([int(f) for f in
+#                        neutral_image[int(location[0, 0])]
+#                        [int(location[1, 0])]])
+#
+#         contours = np.array([np.int32(triangles[j, i])
+#                              for i in range(6)]).reshape(-1, 2)
+#
+#         cv2.fillPoly(img3, [contours], color)
+#
+#         cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
+#                  (triangles[j, 2], triangles[j, 3]),
+#                  (255, 255, 255))
+#         cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
+#                  (triangles[j, 4], triangles[j, 5]),
+#                  (255, 255, 255))
+#         cv2.line(img3, (triangles[j, 4], triangles[j, 5]),
+#                  (triangles[j, 2], triangles[j, 3]),
+#                  (255, 255, 255))
