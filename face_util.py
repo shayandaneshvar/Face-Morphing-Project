@@ -274,10 +274,10 @@ class FaceUtil:
                 :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p1[0], p1[1])
                 location_on_neutral[
-                    1] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                    1,:] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p2[0], p2[1])
                 location_on_neutral[
-                    2] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                    2,:] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p3[0], p3[1])
                 point_location = location_on_neutral.mean(axis=0)  # simplex
 
@@ -329,6 +329,8 @@ class FaceUtil:
                             1, (0, 0, 200))
             # self.first_try_coloring(color_mappings, frame, img3, triangles)
             self.second_try_coloring(color_mappings, frame, img3, triangles)
+
+
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, img3])
             img = np.vstack([img, img2])
@@ -344,32 +346,32 @@ class FaceUtil:
 
     def second_try_coloring(self, color_mappings, frame, img3, triangles):
         for i in range(triangles.simplices.shape[0]):
-            pi1, pi2, pi3 = triangles.simplices[i]
+            pi1, pi2, pi3 = triangles.simplices[i] # check index
             p1 = triangles.points[pi1]
             p2 = triangles.points[pi2]
             p3 = triangles.points[pi3]
-            cv2.line(img3, (
-                int(p1[0] + frame.shape[0] / 1.8),
-                int(p1[1] + frame.shape[1] / 3)),
-                     (int(p2[0] + frame.shape[0] / 1.8),
-                      int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
-            cv2.line(img3, (
-                int(p1[0] + frame.shape[0] / 1.8),
-                int(p1[1] + frame.shape[1] / 3)),
-                     (int(p3[0] + frame.shape[0] / 1.8),
-                      int(p3[1] + frame.shape[1] / 3)), (255, 255, 255))
-            cv2.line(img3, (
-                int(p3[0] + frame.shape[0] / 1.8),
-                int(p3[1] + frame.shape[1] / 3)),
-                     (int(p2[0] + frame.shape[0] / 1.8),
-                      int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+            # cv2.line(img3, (
+            #     int(p1[0] + frame.shape[0] / 1.8),
+            #     int(p1[1] + frame.shape[1] / 3)),
+            #          (int(p2[0] + frame.shape[0] / 1.8),
+            #           int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+            # cv2.line(img3, (
+            #     int(p1[0] + frame.shape[0] / 1.8),
+            #     int(p1[1] + frame.shape[1] / 3)),
+            #          (int(p3[0] + frame.shape[0] / 1.8),
+            #           int(p3[1] + frame.shape[1] / 3)), (255, 255, 255))
+            # cv2.line(img3, (
+            #     int(p3[0] + frame.shape[0] / 1.8),
+            #     int(p3[1] + frame.shape[1] / 3)),
+            #          (int(p2[0] + frame.shape[0] / 1.8),
+            #           int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
             contours = np.array([int(p1[0] + frame.shape[0] / 1.8),
                                  int(p1[1] + frame.shape[1] / 3),
                                  int(p3[0] + frame.shape[0] / 1.8),
                                  int(p3[1] + frame.shape[1] / 3),
                                  int(p2[0] + frame.shape[0] / 1.8),
-                                 int(p2[1] + frame.shape[1] / 3)]).reshape(-1,
-                                                                           2)
+                                 int(p2[1] + frame.shape[1] / 3)])\
+                .reshape(-1,2)
             cv2.fillPoly(img3, [contours], (
                 int(color_mappings[i][0]), int(color_mappings[i][1]),
                 int(color_mappings[i][2])))
@@ -395,15 +397,15 @@ class FaceUtil:
                 # cv2.imshow("sd", v)
                 # cv2.waitKey()
 
-    @classmethod
-    def get_average_color(cls, image, i, j, window_size: int = 3):
+    @staticmethod
+    def get_average_color(image, i, j, window_size: int = 1):
         if window_size % 2 == 0:
             window_size -= 1
         color = np.array([0, 0, 0])
         half_size = window_size // 2
         for x in range(i - half_size, i + half_size + 1):
             for y in range(j - half_size, j + half_size + 1):
-                color += np.int32(image[x, y] / (window_size  ** 2) + 0.49)
+                color += np.int32(image[y, x] / (window_size ** 2))
         return color
 
 # rect = [-frame.shape[0], -frame.shape[1], frame.shape[0], frame.shape[1]]

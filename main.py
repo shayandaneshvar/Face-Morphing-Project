@@ -56,6 +56,7 @@ def phase3(face_util, registered_faces, neutral_image, k=16):
 if __name__ == '__main__':
     name = names[0]
     images = read_images(name)
+    # neutral_image = cv2.imread('images/shayan/photo1643728109.jpeg')
     neutral_image = cv2.imread(f'images/{name}/1.jpg')
     face_util = FaceUtil("lib/shape_predictor_68_face_landmarks.dat")
     registered_faces = phase1(images,
