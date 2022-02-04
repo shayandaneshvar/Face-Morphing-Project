@@ -19,9 +19,7 @@ def read_images(person="alireza"):
     return image_list
 
 
-# ------------ PHASE 1 -- face registeration
-
-
+# ------------ PHASE 1 -- face registration
 def phase1(images, neutral_image, face_util, viz=True, method=transform[0],
            sample_number=6):
     face_util.show_faces_landmarks(images, sample_number)
@@ -61,6 +59,7 @@ def phase3(face_util, registered_faces, neutral_image, k=16,
     miu, U, sigma = face_util.find_pca(registered_faces, k)
     face_util.open_camera(miu, U, neutral_image, triangles_only, method)
 
+
 if __name__ == '__main__':
     name = names[0]
     k = 14
@@ -75,4 +74,4 @@ if __name__ == '__main__':
     phase2(face_util, registered_faces, k=k)
 
     phase3(face_util, registered_faces, neutral_image, k=k,
-           triangles_only=False, method=transform[1])
+           triangles_only=False, method=transform[1]) ## and phase 4
