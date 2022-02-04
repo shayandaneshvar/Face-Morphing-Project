@@ -19,6 +19,7 @@ class FaceUtil:
             y = face_landmarks.part(n).y
             cv2.circle(image, (x, y), 2, (0, 255, 255), 2)
 
+    # detector output to numpy
     def __shape_to_np(self, shape, dtype="int"):
         coords = np.zeros((68, 2), dtype=dtype)
         for i in range(0, 68):
@@ -152,9 +153,9 @@ class FaceUtil:
 
         FaceUtil.draw_face(base, mean_face, (0, 255, 0))
 
-        cv2.imshow('mean face landmarks', base)
+        cv2.imshow('mean registered face landmarks', base)
         cv2.waitKey(0)
-        cv2.destroyWindow('mean face landmarks')
+        cv2.destroyWindow('mean registered face landmarks')
 
     @staticmethod
     def _calc_miu(faces):
@@ -178,20 +179,16 @@ class FaceUtil:
         # print(sigma)
 
         for i in range(min(k, len(sigma))):
-
             for a in np.linspace(- sigma[i], sigma[i], 200):
                 img = np.zeros((800, 800, 3), np.uint8)
                 face = miu + np.matrix(a * U[:, i]).reshape((136, 1))
                 for j in range(0, 136, 2):
                     cv2.circle(
-                        img,
-                        (int(face[j, 0]) + 200, int(face[j + 1, 0]) + 200),
-                        1,
-                        (255, 125, 125),
-                        1,
-                    )
+                        img, (int(face[j, 0]) + 200, int(face[j + 1, 0]) + 200),
+                        1, (255, 125, 125), 1)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    cv2.destroyWindow("face model")
+                    return
                 cv2.putText(img, f"sigma: {a}", (300, 500),
                             cv2.FONT_HERSHEY_COMPLEX,
                             1, (0, 0, 255))
@@ -201,14 +198,7 @@ class FaceUtil:
                 cv2.imshow("face model", img)
                 cv2.waitKey(10)
 
-    # @staticmethod  # rect -> detect face
-    # def triangulate(face, rect):
-    #     subdiv = cv2.Subdiv2D(rect)
-    #     points = face.reshape(-1, 2)
-    #     for point in points:
-    #         p = (point[0], point[1])
-    #         subdiv.insert(p)
-    #     return subdiv.getTriangleList()
+        cv2.destroyWindow("face model")
 
     @staticmethod
     def triangulate(face):
@@ -237,12 +227,21 @@ class FaceUtil:
                 return NL_landmarks[i, 0], NL_landmarks[i + 1, 0]
         return -1
 
-    def open_camera(self, miu, U, neutral_image):
+    def open_camera(self, miu, U, neutral_image, triangles_only=False,
+                    method="affine"):
         camera_id = 0
         cap = cv2.VideoCapture(camera_id)
         NL, NL_Mean = self.get_normalized_face_landmarks(neutral_image)  # Nln
         NL_landmarks = NL + NL_Mean
         NL_landmarks = NL_landmarks.reshape((136, 1))
+        register_function = None
+        if method == "affine":
+            print("Choosing Affine registration")
+            register_function = self._affine_register
+        else:
+            print("Choosing Similarity registration")
+            register_function = self._similarity_register
+
         M = FaceUtil._affine_register(miu.reshape((68, 2)), NL)
         NL = FaceUtil._apply_transform(NL, M)
         NL = NL.flatten().reshape((136, 1))
@@ -274,25 +273,18 @@ class FaceUtil:
                 :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p1[0], p1[1])
                 location_on_neutral[
-                    1,:] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                1,
+                :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p2[0], p2[1])
                 location_on_neutral[
-                    2,:] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                2,
+                :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p3[0], p3[1])
                 point_location = location_on_neutral.mean(axis=0)  # simplex
 
                 color_mappings[i] = FaceUtil.get_average_color(
                     neutral_image, int(point_location[0]),
                     int(point_location[1]))
-
-            # for i in range(triangles.simplices.shape[0]):
-            #     v = np.zeros((500, 500, 3), np.uint8)
-            #     v[:] = [color_mappings[i][0], color_mappings[i][1],
-            #             color_mappings[i][2]]
-            #     cv2.putText(v, f"{}", (10, 10), 3, 5, (255,0,255))
-            # cv2.imshow("sd", v)
-            # cv2.waitKey(100)
-            # print("s")
 
             # X = miu + aU -> X - miu = aU -> a = (U.T @ U).inv @ U.T @ (X - miu)
             # a, _, __, ___ = np.linalg.lstsq(U, X - miu, rcond=None)
@@ -327,10 +319,10 @@ class FaceUtil:
                 )
                 cv2.putText(img3, "The Other Guy - triangulated", (50, 50), 3,
                             1, (0, 0, 200))
-            # self.first_try_coloring(color_mappings, frame, img3, triangles)
-            self.second_try_coloring(color_mappings, frame, img3, triangles)
-
-
+            self.color_image_with_neutral_face(color_mappings,
+                                               frame,
+                                               img3,
+                                               triangles, triangles_only)
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, img3])
             img = np.vstack([img, img2])
@@ -344,58 +336,40 @@ class FaceUtil:
         cap.release()
         cv2.destroyAllWindows()
 
-    def second_try_coloring(self, color_mappings, frame, img3, triangles):
+    def color_image_with_neutral_face(self, color_mappings, frame, img3,
+                                      triangles, triangles_only=False):
         for i in range(triangles.simplices.shape[0]):
-            pi1, pi2, pi3 = triangles.simplices[i] # check index
+            pi1, pi2, pi3 = triangles.simplices[i]  # check index
             p1 = triangles.points[pi1]
             p2 = triangles.points[pi2]
             p3 = triangles.points[pi3]
-            # cv2.line(img3, (
-            #     int(p1[0] + frame.shape[0] / 1.8),
-            #     int(p1[1] + frame.shape[1] / 3)),
-            #          (int(p2[0] + frame.shape[0] / 1.8),
-            #           int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
-            # cv2.line(img3, (
-            #     int(p1[0] + frame.shape[0] / 1.8),
-            #     int(p1[1] + frame.shape[1] / 3)),
-            #          (int(p3[0] + frame.shape[0] / 1.8),
-            #           int(p3[1] + frame.shape[1] / 3)), (255, 255, 255))
-            # cv2.line(img3, (
-            #     int(p3[0] + frame.shape[0] / 1.8),
-            #     int(p3[1] + frame.shape[1] / 3)),
-            #          (int(p2[0] + frame.shape[0] / 1.8),
-            #           int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+            if triangles_only:
+                cv2.line(img3, (
+                    int(p1[0] + frame.shape[0] / 1.8),
+                    int(p1[1] + frame.shape[1] / 3)),
+                         (int(p2[0] + frame.shape[0] / 1.8),
+                          int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+                cv2.line(img3, (
+                    int(p1[0] + frame.shape[0] / 1.8),
+                    int(p1[1] + frame.shape[1] / 3)),
+                         (int(p3[0] + frame.shape[0] / 1.8),
+                          int(p3[1] + frame.shape[1] / 3)), (255, 255, 255))
+                cv2.line(img3, (
+                    int(p3[0] + frame.shape[0] / 1.8),
+                    int(p3[1] + frame.shape[1] / 3)),
+                         (int(p2[0] + frame.shape[0] / 1.8),
+                          int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+                continue
             contours = np.array([int(p1[0] + frame.shape[0] / 1.8),
                                  int(p1[1] + frame.shape[1] / 3),
                                  int(p3[0] + frame.shape[0] / 1.8),
                                  int(p3[1] + frame.shape[1] / 3),
                                  int(p2[0] + frame.shape[0] / 1.8),
-                                 int(p2[1] + frame.shape[1] / 3)])\
-                .reshape(-1,2)
+                                 int(p2[1] + frame.shape[1] / 3)]) \
+                .reshape(-1, 2)
             cv2.fillPoly(img3, [contours], (
                 int(color_mappings[i][0]), int(color_mappings[i][1]),
                 int(color_mappings[i][2])))
-
-    def first_try_coloring(self, color_mappings, frame, img3, triangles):
-        for i in range(img3.shape[0]):  # fixme
-            for j in range(img3.shape[1]):
-                x = i - frame.shape[0] / 1.8
-                y = j - frame.shape[1] / 3
-                triangle_index = FaceUtil.get_triangle_index_containing_point(
-                    triangles, y, x)
-                if triangle_index[0] < 0:
-                    continue
-                img3[i, j] = color_mappings[triangle_index[0]]
-                # print(f"-----------------> {(i,j)}")
-                # v = np.zeros((500, 500, 3), np.uint8)
-                # v[:] = [color_mappings[i][0], color_mappings[i][1],
-                #         color_mappings[i][2]]
-                # cv2.putText(v, f"{x}", (0, 100), 3, 1, (255, 0, 255))
-                # cv2.putText(v, f"{y}", (0, 160), 3, 1, (255, 0, 255))
-                # cv2.putText(v, f"{j}", (0, 400), 3, 1, (255, 0, 255))
-                # cv2.putText(v, f"{i}", (0, 450), 3, 1, (255, 0, 255))
-                # cv2.imshow("sd", v)
-                # cv2.waitKey()
 
     @staticmethod
     def get_average_color(image, i, j, window_size: int = 1):
@@ -407,41 +381,3 @@ class FaceUtil:
             for y in range(j - half_size, j + half_size + 1):
                 color += np.int32(image[y, x] / (window_size ** 2))
         return color
-
-# rect = [-frame.shape[0], -frame.shape[1], frame.shape[0], frame.shape[1]]
-#
-# if len(rect) is 4:
-#     try:
-#         triangles = FaceUtil.triangulate(X, rect,
-#                                          frame.shape[0] / 1.8,
-#                                          frame.shape[1] / 3)
-#     except Exception:
-#         triangles = np.array([])
-#         pass
-#         # out of range ...
-#
-#     for j in range(triangles.shape[0]):
-#         x = triangles[j, 0] + triangles[j, 2] + triangles[j, 4]
-#         y = triangles[j, 1] + triangles[j, 3] + triangles[j, 5]
-#         x /= 3
-#         y /= 3
-#         M_inverse = np.linalg.inv(M)
-#         location = M_inverse @ np.array([[x], [y]])
-#         color = tuple([int(f) for f in
-#                        neutral_image[int(location[0, 0])]
-#                        [int(location[1, 0])]])
-#
-#         contours = np.array([np.int32(triangles[j, i])
-#                              for i in range(6)]).reshape(-1, 2)
-#
-#         cv2.fillPoly(img3, [contours], color)
-#
-#         cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
-#                  (triangles[j, 2], triangles[j, 3]),
-#                  (255, 255, 255))
-#         cv2.line(img3, (triangles[j, 0], triangles[j, 1]),
-#                  (triangles[j, 4], triangles[j, 5]),
-#                  (255, 255, 255))
-#         cv2.line(img3, (triangles[j, 4], triangles[j, 5]),
-#                  (triangles[j, 2], triangles[j, 3]),
-#                  (255, 255, 255))
