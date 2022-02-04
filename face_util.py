@@ -17,7 +17,7 @@ class FaceUtil:
         for n in range(0, 68):
             x = face_landmarks.part(n).x
             y = face_landmarks.part(n).y
-            cv2.circle(image, (x, y), 1, (0, 255, 255), 1)
+            cv2.circle(image, (x, y), 2, (0, 255, 255), 2)
 
     def __shape_to_np(self, shape, dtype="int"):
         coords = np.zeros((68, 2), dtype=dtype)
@@ -251,7 +251,7 @@ class FaceUtil:
             _, frame = cap.read()
             frame = frame[:, ::-1]  # mirror
             X, _ = self.get_normalized_face_landmarks(frame)
-            img3 = np.zeros((frame.shape[0], frame.shape[1], 3), np.uint8)
+            img3 = np.ones((frame.shape[0], frame.shape[1], 3), np.uint8) * 50
             M = FaceUtil._affine_register(miu.reshape((68, 2)), X)
             X = FaceUtil._apply_transform(X, M)
 
@@ -280,8 +280,10 @@ class FaceUtil:
                     2] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
                     transformed_neutral_face, NL_landmarks, p3[0], p3[1])
                 point_location = location_on_neutral.mean(axis=0)  # simplex
-                color_mappings[i] = neutral_image[
-                    int(point_location[0]), int(point_location[1])]
+
+                color_mappings[i] = FaceUtil.get_average_color(
+                    neutral_image, int(point_location[0]),
+                    int(point_location[1]))
 
             # for i in range(triangles.simplices.shape[0]):
             #     v = np.zeros((500, 500, 3), np.uint8)
@@ -325,26 +327,8 @@ class FaceUtil:
                 )
                 cv2.putText(img3, "The Other Guy - triangulated", (50, 50), 3,
                             1, (0, 0, 200))
-            for i in range(img3.shape[0]):  # fixme
-                for j in range(img3.shape[1]):
-                    y = i - frame.shape[1] / 3
-                    x = j - frame.shape[0] / 1.8
-                    triangle_index = FaceUtil.get_triangle_index_containing_point(
-                        triangles, x, y)
-                    if triangle_index[0] < 0:
-                        continue
-                    img3[i, j] = color_mappings[triangle_index[0]]
-                    # print(f"-----------------> {(i,j)}")
-                    v = np.zeros((500, 500, 3), np.uint8)
-                    v[:] = [color_mappings[i][0], color_mappings[i][1],
-                            color_mappings[i][2]]
-                    cv2.putText(v, f"{x}", (0, 100), 3, 1, (255, 0, 255))
-                    cv2.putText(v, f"{y}", (0, 160), 3, 1, (255, 0, 255))
-                    cv2.putText(v, f"{j}", (0, 400), 3, 1, (255, 0, 255))
-                    cv2.putText(v, f"{i}", (0, 450), 3, 1, (255, 0, 255))
-                    cv2.imshow("sd", v)
-                    cv2.waitKey()
-
+            # self.first_try_coloring(color_mappings, frame, img3, triangles)
+            self.second_try_coloring(color_mappings, frame, img3, triangles)
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, img3])
             img = np.vstack([img, img2])
@@ -357,6 +341,70 @@ class FaceUtil:
 
         cap.release()
         cv2.destroyAllWindows()
+
+    def second_try_coloring(self, color_mappings, frame, img3, triangles):
+        for i in range(triangles.simplices.shape[0]):
+            pi1, pi2, pi3 = triangles.simplices[i]
+            p1 = triangles.points[pi1]
+            p2 = triangles.points[pi2]
+            p3 = triangles.points[pi3]
+            cv2.line(img3, (
+                int(p1[0] + frame.shape[0] / 1.8),
+                int(p1[1] + frame.shape[1] / 3)),
+                     (int(p2[0] + frame.shape[0] / 1.8),
+                      int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+            cv2.line(img3, (
+                int(p1[0] + frame.shape[0] / 1.8),
+                int(p1[1] + frame.shape[1] / 3)),
+                     (int(p3[0] + frame.shape[0] / 1.8),
+                      int(p3[1] + frame.shape[1] / 3)), (255, 255, 255))
+            cv2.line(img3, (
+                int(p3[0] + frame.shape[0] / 1.8),
+                int(p3[1] + frame.shape[1] / 3)),
+                     (int(p2[0] + frame.shape[0] / 1.8),
+                      int(p2[1] + frame.shape[1] / 3)), (255, 255, 255))
+            contours = np.array([int(p1[0] + frame.shape[0] / 1.8),
+                                 int(p1[1] + frame.shape[1] / 3),
+                                 int(p3[0] + frame.shape[0] / 1.8),
+                                 int(p3[1] + frame.shape[1] / 3),
+                                 int(p2[0] + frame.shape[0] / 1.8),
+                                 int(p2[1] + frame.shape[1] / 3)]).reshape(-1,
+                                                                           2)
+            cv2.fillPoly(img3, [contours], (
+                int(color_mappings[i][0]), int(color_mappings[i][1]),
+                int(color_mappings[i][2])))
+
+    def first_try_coloring(self, color_mappings, frame, img3, triangles):
+        for i in range(img3.shape[0]):  # fixme
+            for j in range(img3.shape[1]):
+                x = i - frame.shape[0] / 1.8
+                y = j - frame.shape[1] / 3
+                triangle_index = FaceUtil.get_triangle_index_containing_point(
+                    triangles, y, x)
+                if triangle_index[0] < 0:
+                    continue
+                img3[i, j] = color_mappings[triangle_index[0]]
+                # print(f"-----------------> {(i,j)}")
+                # v = np.zeros((500, 500, 3), np.uint8)
+                # v[:] = [color_mappings[i][0], color_mappings[i][1],
+                #         color_mappings[i][2]]
+                # cv2.putText(v, f"{x}", (0, 100), 3, 1, (255, 0, 255))
+                # cv2.putText(v, f"{y}", (0, 160), 3, 1, (255, 0, 255))
+                # cv2.putText(v, f"{j}", (0, 400), 3, 1, (255, 0, 255))
+                # cv2.putText(v, f"{i}", (0, 450), 3, 1, (255, 0, 255))
+                # cv2.imshow("sd", v)
+                # cv2.waitKey()
+
+    @classmethod
+    def get_average_color(cls, image, i, j, window_size: int = 3):
+        if window_size % 2 == 0:
+            window_size -= 1
+        color = np.array([0, 0, 0])
+        half_size = window_size // 2
+        for x in range(i - half_size, i + half_size + 1):
+            for y in range(j - half_size, j + half_size + 1):
+                color += np.int32(image[x, y] / (window_size  ** 2) + 0.49)
+        return color
 
 # rect = [-frame.shape[0], -frame.shape[1], frame.shape[0], frame.shape[1]]
 #
