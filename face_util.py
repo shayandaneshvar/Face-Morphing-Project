@@ -228,21 +228,20 @@ class FaceUtil:
         return -1
 
     def open_camera(self, miu, U, neutral_image, triangles_only=False,
-                    method="affine"):
+                    method="affine", approx=True):
         camera_id = 0
         cap = cv2.VideoCapture(camera_id)
         NL, NL_Mean = self.get_normalized_face_landmarks(neutral_image)  # Nln
         NL_landmarks = NL + NL_Mean
         NL_landmarks = NL_landmarks.reshape((136, 1))
-        register_function = None
+        M = None
         if method == "affine":
             print("Choosing Affine registration")
-            register_function = self._affine_register
+            M = FaceUtil._affine_register(miu.reshape((68, 2)), NL)
         else:
             print("Choosing Similarity registration")
-            register_function = self._similarity_register
+            M = FaceUtil._similarity_register(miu.reshape((68, 2)), NL)
 
-        M = FaceUtil._affine_register(miu.reshape((68, 2)), NL)
         NL = FaceUtil._apply_transform(NL, M)
         NL = NL.flatten().reshape((136, 1))
 
@@ -319,10 +318,19 @@ class FaceUtil:
                 )
                 cv2.putText(img3, "The Other Guy - triangulated", (50, 50), 3,
                             1, (0, 0, 200))
-            self.color_image_with_neutral_face(color_mappings,
-                                               frame,
-                                               img3,
-                                               triangles, triangles_only)
+            if approx:
+                self.color_image_with_neutral_face(color_mappings,
+                                                   frame,
+                                                   img3,
+                                                   triangles, triangles_only)
+            else:
+                img3 = self.color_image_with_neutral_face_with_details(frame,
+                                                                       img3,
+                                                                       triangles,
+                                                                       transformed_neutral_face,
+                                                                       NL_landmarks,
+                                                                       neutral_image)
+
             img = np.hstack([img, frame])
             img2 = np.hstack([img2, img3])
             img = np.vstack([img, img2])
@@ -336,7 +344,53 @@ class FaceUtil:
         cap.release()
         cv2.destroyAllWindows()
 
-    def color_image_with_neutral_face(self, color_mappings, frame, img3,
+    @staticmethod
+    def color_image_with_neutral_face_with_details(frame, img3, triangles,
+                                                   transformed_neutral_face,
+                                                   NL_landmarks, neutral_image):
+        s1 = frame.shape[0] / 1.8
+        s2 = frame.shape[1] / 3
+        neutral_image = neutral_image.copy()
+        for i in range(triangles.simplices.shape[0]):
+            pi1, pi2, pi3 = triangles.simplices[i]
+            p1 = triangles.points[pi1]
+            p2 = triangles.points[pi2]
+            p3 = triangles.points[pi3]
+            location_on_neutral = np.zeros((3, 2))
+
+            location_on_neutral[0,
+            :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                transformed_neutral_face, NL_landmarks, p1[0], p1[1])
+            location_on_neutral[1,
+            :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                transformed_neutral_face, NL_landmarks, p2[0], p2[1])
+            location_on_neutral[2,
+            :] = FaceUtil.get_neutral_face_landmark_from_transformed_neutral_face(
+                transformed_neutral_face, NL_landmarks, p3[0], p3[1])
+
+            pts1 = np.float32(location_on_neutral)
+            pts2 = np.float32(
+                [[p1[0] + s1, p1[1] + s2], [p2[0] + s1, p2[1] + s2],
+                 [p3[0] + s1, p3[1] + s2]])
+            M = cv2.getAffineTransform(pts1, pts2)
+            dst = cv2.warpAffine(neutral_image, M, (
+                neutral_image.shape[1], neutral_image.shape[0]))
+            # Create a rough mask on the triangle
+            src_mask = np.zeros(
+                (neutral_image.shape[0], neutral_image.shape[1], 3))
+            poly = np.int32(pts2)
+            cv2.fillPoly(src_mask, [poly], (255, 255, 255))
+            poly_copied = np.multiply(src_mask, dst)
+            mask = np.ones((neutral_image.shape[0], neutral_image.shape[1], 3))
+            # assuming src1 and src2 are of same size
+
+            cv2.fillPoly(mask, [poly], (0, 0, 0))
+            img3 = np.multiply(mask, neutral_image.copy())
+            img3 = np.add(poly_copied, img3)
+        return cv2.resize(img3, (640, 480)) # fix this method idk what the f is this!
+
+    @staticmethod
+    def color_image_with_neutral_face(color_mappings, frame, img3,
                                       triangles, triangles_only=False):
         for i in range(triangles.simplices.shape[0]):
             pi1, pi2, pi3 = triangles.simplices[i]  # check index

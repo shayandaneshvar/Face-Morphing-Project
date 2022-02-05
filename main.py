@@ -61,7 +61,7 @@ def phase3(face_util, registered_faces, neutral_image, k=16,
 
 
 if __name__ == '__main__':
-    name = names[0]
+    name = names[1]
     k = 14
     images = read_images(name)
     neutral_image = cv2.imread(f'images/{name}/1.jpg')
@@ -69,9 +69,9 @@ if __name__ == '__main__':
     registered_faces = phase1(images,
                               neutral_image,
                               face_util,
-                              viz=True,
-                              method=transform[0], sample_number=1)
-    phase2(face_util, registered_faces, k=k)
+                              viz=False,
+                              method=transform[0], sample_number=0)
+    # phase2(face_util, registered_faces, k=k)
 
     phase3(face_util, registered_faces, neutral_image, k=k,
-           triangles_only=False, method=transform[1]) ## and phase 4
+           triangles_only=False, method=transform[0])  # and phase 4
